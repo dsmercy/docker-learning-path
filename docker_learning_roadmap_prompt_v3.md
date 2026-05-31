@@ -49,12 +49,12 @@ training .NET developers on containerization from zero to enterprise-grade deplo
 | Layer       | Technology                        |
 |-------------|-----------------------------------|
 | Frontend    | React with Vite                   |
-| Backend     | ASP.NET Core Web API (.NET 8+)    |
+| Backend     | Express.js (Node 20-alpine)       |
 | Mock API    | Express.js (Node 20-alpine)       |
-| Database    | PostgreSQL 16-alpine              |
+| Database    | MongoDB 7 (mongodb:7.0)           |
 | Cache       | Redis 7-alpine                    |
 | Proxy       | Nginx (stable-alpine)             |
-| Logging     | Seq                               |
+| Logging     | Winston + Loki + Grafana          |
 | Monitoring  | Prometheus + Grafana              |
 | CI/CD       | GitHub Actions                    |
 
@@ -582,7 +582,7 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 
 ---
 
-### Phase 6 — Frontend + Backend (ASP.NET Core)
+### Phase 6 — Frontend + Backend (Express.js)
 
 **Week:** 3–4 | **Effort:** 3–4 days | **Prerequisites:** Phase 5
 
@@ -590,32 +590,32 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 
 **Stack:**
 - React Vite frontend (product list, add, delete)
-- ASP.NET Core 8 Web API (in-memory product store)
+- Express.js API (Node 20-alpine, in-memory product store)
 
 **Focus:**
-- Dockerizing ASP.NET Core: correct base images (`mcr.microsoft.com/dotnet/aspnet:8.0`)
-- `ASPNETCORE_URLS` and `ASPNETCORE_ENVIRONMENT` env vars
-- `HEALTHCHECK` on the ASP.NET Core API (`/health` endpoint)
+- Dockerizing Express.js: correct base image (`node:20-alpine`)
+- `NODE_ENV` and `PORT` env vars
+- `HEALTHCHECK` on the Express API (`/health` endpoint)
 - CORS configuration for cross-container communication
 - `docker-compose.yml` linking frontend and backend
 
-**.dockerignore for .NET projects must exclude:**
-`bin/`, `obj/`, `.vs/`, `*.user`, `*.suo`
+**.dockerignore for Node projects must exclude:**
+`node_modules/`, `dist/`, `.env`, `.env.*`
 
 **Docker Desktop focus for this phase:**
-- Containers panel → ASP.NET Core container → **"Logs"** tab:
-  watch the ASP.NET Core startup log stream in real time — look for the
-  "Now listening on" line to confirm the app bound to the right port;
-  watch for EF Core or startup exception stack traces here
+- Containers panel → Express API container → **"Logs"** tab:
+  watch the Node.js startup log stream in real time — look for the
+  "listening on port" line to confirm the app bound to the right port;
+  watch for uncaught exceptions or startup errors here
   CLI equivalent: `docker compose logs -f api`
-- Containers panel → ASP.NET Core container → **"Stats"** tab:
-  observe memory usage of the .NET runtime — compare against the frontend container;
-  use this to benchmark the memory cost of .NET vs Node
+- Containers panel → Express API container → **"Stats"** tab:
+  observe memory usage of the Node.js runtime — compare against the frontend container;
+  use this to benchmark the memory cost of Node vs Nginx
   CLI equivalent: `docker stats`
 - Containers panel → any container → **"Exec"** tab (terminal icon):
   Docker Desktop provides a browser-based terminal into the running container;
   use this to run `whoami` (confirm non-root), `env` (confirm env vars),
-  `wget -qO- http://localhost:8080/health` (confirm health endpoint)
+  `wget -qO- http://localhost:3001/health` (confirm health endpoint)
   CLI equivalent: `docker exec -it <container> /bin/sh`
   ⚠ Docker Desktop Exec tab cannot handle interactive programs (top, vim) —
   use the WSL2 terminal for those
@@ -626,9 +626,9 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 **Completion Criteria:**
 - `docker ps` shows both containers with status `healthy`
 - Docker Desktop Containers panel shows green "healthy" badge on the API container
-- React frontend performs full CRUD against the ASP.NET Core API
+- React frontend performs full CRUD against the Express.js API
 - `docker exec` (CLI) and Exec tab (Docker Desktop) both confirm non-root user
-- Image sizes documented: frontend < 50 MB, API < 120 MB — visible in Images panel
+- Image sizes documented: frontend < 50 MB, API < 60 MB — visible in Images panel
 
 ---
 
@@ -636,47 +636,47 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 
 **Week:** 4 | **Effort:** 3–4 days | **Prerequisites:** Phase 6
 
-**Project:** Product Management Application V2 (with PostgreSQL)
+**Project:** Product Management Application V2 (with MongoDB)
 
 **Stack:**
 - React Vite frontend
-- ASP.NET Core 8 Web API
-- PostgreSQL 16-alpine
+- Express.js API (Node 20-alpine)
+- MongoDB 7 (`mongodb:7.0`)
 
 **Focus:**
-- PostgreSQL container configuration (env vars, init scripts)
-- Connection strings in ASP.NET Core via environment variables
-- EF Core 8 migrations inside Docker
-- Named volumes for PostgreSQL data directory
-- `pg_isready` health check on the database container
+- MongoDB container configuration (env vars, init scripts)
+- Connection strings in Express.js via environment variables (Mongoose)
+- Seed data script that runs on container start
+- Named volumes for MongoDB data directory
+- `mongosh --eval "db.adminCommand('ping')"` health check on the database container
 - `depends_on: condition: service_healthy`
 
 **Docker Desktop focus for this phase:**
-- Containers panel → PostgreSQL container → **"Logs"** tab:
-  watch the PostgreSQL init log — look for "database system is ready to accept connections";
-  this is the signal that `pg_isready` will start returning healthy
+- Containers panel → MongoDB container → **"Logs"** tab:
+  watch the MongoDB init log — look for "Waiting for connections" message;
+  this is the signal that the health check will start returning healthy
   CLI equivalent: `docker compose logs -f db`
-- **Volumes panel → PostgreSQL volume → "Data" tab**:
-  browse the PostgreSQL data directory (`/var/lib/postgresql/data`) visually;
-  after running migrations, confirm the directory is populated (not empty);
+- **Volumes panel → MongoDB volume → "Data" tab**:
+  browse the MongoDB data directory (`/data/db`) visually;
+  after seeding, confirm the directory is populated (not empty);
   after `docker compose down` and `docker compose up`, confirm data is still there
   CLI equivalent: `docker run --rm -v <volume>:/data alpine ls /data`
-- Containers panel → PostgreSQL container → **"Exec"** tab:
-  open a terminal into the PostgreSQL container and run:
-  `psql -U postgres -d ecommerce -c "SELECT * FROM products;"`
-  to verify migrations ran and data is present
-  CLI equivalent: `docker exec -it <db-container> psql -U postgres`
+- Containers panel → MongoDB container → **"Exec"** tab:
+  open a terminal into the MongoDB container and run:
+  `mongosh ecommerce --eval "db.products.find().pretty()"`
+  to verify seed data is present
+  CLI equivalent: `docker exec -it <db-container> mongosh`
 - Containers panel → API container → **"Inspect"** → look for the
-  `ConnectionStrings__DefaultConnection` environment variable —
-  confirm it points to the PostgreSQL service name, not `localhost`
+  `MONGODB_URI` environment variable —
+  confirm it points to the MongoDB service name, not `localhost`
 
 **Completion Criteria:**
 - Products survive `docker compose down` + `docker compose up` —
-  verify in Volumes panel Data tab AND via `psql` query
-- EF Core migrations run automatically on container start
-- PostgreSQL container shows `healthy` in Docker Desktop before API container starts
+  verify in Volumes panel Data tab AND via `mongosh` query
+- Seed script runs automatically on container start
+- MongoDB container shows `healthy` in Docker Desktop before API container starts
 - API container shows `healthy` in Docker Desktop Containers panel
-- `docker exec` into PostgreSQL (via Exec tab or CLI) and query the products table
+- `docker exec` into MongoDB (via Exec tab or CLI) and query the products collection
 
 ---
 
@@ -688,7 +688,7 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 
 **Focus:**
 - Multi-stage builds for the React frontend (build stage → Nginx runtime stage)
-- Multi-stage builds for the ASP.NET Core API (SDK build stage → runtime-only stage)
+- Multi-stage builds for the Express.js API (deps-install stage → production-only stage)
 - Non-root users in all containers
 - `HEALTHCHECK` review across all services
 - Image size comparison: before and after (document numbers in README)
@@ -720,7 +720,7 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 
 **Completion Criteria:**
 - React production image is under 30 MB — visible in Images panel
-- ASP.NET Core production image is under 100 MB — visible in Images panel
+- Express.js API production image is under 60 MB — visible in Images panel
 - All containers run as non-root — confirmed via Exec tab `whoami`
 - Local registry running at `localhost:5000`; images pushed and pulled successfully
 - Layer count visibly lower in prod image vs dev image (Images → Image layers tab)
@@ -737,7 +737,7 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 **Add:** Nginx (stable-alpine) as the single entry point
 
 **Focus:**
-- Nginx routing `/api/*` to the ASP.NET Core container, `/` to the React container
+- Nginx routing `/api/*` to the Express.js API container, `/` to the React container
 - Single external port (80) — no direct port exposure for frontend or backend containers
 - SSL/TLS with a self-signed cert (openssl, Nginx config)
 - Load balancing: Nginx upstream block with two API replicas (`--scale api=2`)
@@ -753,7 +753,7 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
   Compose app group — visual confirmation that scaling worked
   CLI equivalent: `docker compose ps`
 - Networks panel → click the Compose network → see all containers (Nginx, frontend,
-  api-1, api-2, db) listed with their internal IPs — Nginx is the only one
+  api-1, api-2, mongo) listed with their internal IPs — Nginx is the only one
   with a port mapped to the host; the rest are only reachable internally
 - Containers panel → Nginx container → **"Logs"** tab:
   watch access logs as you make requests — each request from the browser
@@ -775,14 +775,14 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
 **Project:** Production-style Deployment with Observability Stack
 
 **Add:**
-- **Seq** — structured log aggregation (ASP.NET Core logs via Serilog)
-- **Prometheus** — metrics scraping
-- **Grafana** — metrics dashboards
+- **Winston + Loki** — structured log aggregation (Express.js logs via Winston → Grafana Loki)
+- **Prometheus** — metrics scraping (`prom-client` in Express.js)
+- **Grafana** — metrics and log dashboards
 
 **Focus:**
-- Serilog in ASP.NET Core writing structured JSON logs to Seq
-- Prometheus scraping the `/metrics` endpoint (use `prometheus-net`)
-- Grafana connecting to Prometheus, displaying request rate and error rate
+- Winston in Express.js writing structured JSON logs, shipped to Grafana Loki
+- Prometheus scraping the `/metrics` endpoint (use `prom-client`)
+- Grafana connecting to Prometheus and Loki, displaying request rate, error rate, and logs
 - Log levels and filtering in containerized environments
 - Why `docker logs` alone is not enough in production
 
@@ -792,12 +792,12 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
   use this to observe resource usage as you generate load (e.g. run a loop of curl requests);
   compare this with what Prometheus and Grafana report for the same period
   CLI equivalent: `docker stats`
-- Containers panel → Seq container → **"Ports"** tab:
-  confirm port 5341 is mapped; click the port link to open Seq directly in your browser
+- Containers panel → Loki container → **"Ports"** tab:
+  confirm port 3100 is mapped; Loki is the log aggregation backend for Grafana
 - Containers panel → Prometheus container → **"Ports"** tab:
   click port 9090 link to open the Prometheus UI
 - Containers panel → Grafana container → **"Ports"** tab:
-  click port 3001 link to open Grafana UI
+  click port 3000 link to open Grafana UI (both Prometheus metrics and Loki logs visible here)
 - Docker Desktop Stats tab is complementary to Grafana, not a replacement —
   Stats tab shows single-container metrics with no persistence;
   Grafana shows cross-container metrics with historical data and alerting
@@ -805,9 +805,9 @@ Use Docker Desktop → Volumes → Data tab to browse volume contents from Windo
   the Containers panel to filter by name and find specific containers quickly
 
 **Completion Criteria:**
-- Seq UI shows structured logs at `http://localhost:5341` — opened via Docker Desktop port link
+- Grafana UI shows structured logs from Loki at `http://localhost:3000` — opened via Docker Desktop port link
 - Prometheus scrapes metrics at `http://localhost:9090`
-- Grafana dashboard shows request rate and error rate at `http://localhost:3001`
+- Grafana dashboard shows request rate and error rate sourced from Prometheus at `http://localhost:3000`
 - Docker Desktop Stats tab confirms all containers are within expected resource usage
 - All monitoring services start via a single `docker compose up -d`
 
@@ -924,12 +924,12 @@ Code Push → Lint → Test → Docker Build → Trivy Scan → Docker Push → 
 | Service      | Technology                      |
 |--------------|---------------------------------|
 | Frontend     | React (Vite)                    |
-| Backend      | ASP.NET Core 8 Web API          |
-| Database     | PostgreSQL 16-alpine            |
+| Backend      | Express.js (Node 20-alpine)     |
+| Database     | MongoDB 7 (`mongodb:7.0`)       |
 | Cache        | Redis 7-alpine                  |
 | Message bus  | RabbitMQ 3-management-alpine    |
 | Proxy        | Nginx (stable-alpine)           |
-| Logging      | Seq                             |
+| Logging      | Winston + Loki + Grafana        |
 | Monitoring   | Prometheus + Grafana            |
 
 **Features:**
@@ -947,7 +947,7 @@ Code Push → Lint → Test → Docker Build → Trivy Scan → Docker Push → 
 - **Per-service log monitoring workflow:**
   open multiple Docker Desktop windows (or browser tabs if using the web UI)
   with different service logs open simultaneously — API logs, RabbitMQ logs, Seq logs
-- **Volumes panel:** verify PostgreSQL, Redis, and RabbitMQ volumes are all present
+- **Volumes panel:** verify MongoDB, Redis, and RabbitMQ volumes are all present
   and populated — browse each with the Data tab
 - **Networks panel:** verify all 8 containers are on the same internal network
   with only Nginx having an external port
@@ -964,7 +964,7 @@ Code Push → Lint → Test → Docker Build → Trivy Scan → Docker Push → 
 - Docker secrets for all credentials
 - `HEALTHCHECK` on every service
 - `depends_on: condition: service_healthy` across the entire stack
-- Named volumes for PostgreSQL, Redis, RabbitMQ
+- Named volumes for MongoDB, Redis, RabbitMQ
 - Nginx as the single entry point
 - Full monitoring and logging stack
 - Resource limits on all services
@@ -1016,9 +1016,9 @@ Include this table in the Phase 1 README and reference it from every subsequent 
 | 1    | 1, 2           | First custom Docker image running; Docker Desktop navigation fluent |
 | 2    | 3, 4           | Networking and volumes — verified via Networks and Volumes panels |
 | 3    | 5, 6 (start)   | Compose app grouping; ASP.NET Core health badge in Desktop |
-| 4    | 6 (end), 7     | Full stack with PostgreSQL — volume data browser confirms persistence |
+| 4    | 6 (end), 7     | Full stack with MongoDB — volume data browser confirms persistence |
 | 5    | 8, 9 (start)   | Production image size comparison in Images panel; Scout first scan |
-| 6    | 9 (end), 10    | Nginx port isolation visible in Desktop; Stats vs Grafana comparison |
+| 6    | 9 (end), 10    | Nginx port isolation visible in Desktop; Stats vs Grafana/Loki comparison |
 | 7    | 11, 12         | Scout CVE dashboard; CI-built images pulled and verified in Desktop |
 | 8–10 | 13             | 8-service Compose group in Desktop — mission control for enterprise stack |
 
@@ -1029,8 +1029,8 @@ Include this table in the Phase 1 README and reference it from every subsequent 
 By the end of this roadmap I will be able to:
 
 - Dockerize React applications with production-optimized multi-stage builds
-- Dockerize ASP.NET Core APIs with non-root users and health checks
-- Run and manage PostgreSQL in containers with persistent named volumes
+- Dockerize Express.js APIs with non-root users and health checks
+- Run and manage MongoDB in containers with persistent named volumes
 - Orchestrate multi-container environments with Docker Compose
 - Secure containers: non-root, secrets, capability drops, vulnerability scanning
 - Build automated CI/CD pipelines with Docker and GitHub Actions
@@ -1059,8 +1059,8 @@ By the end of this roadmap I will be able to:
 | Phase 3 | Networking CLI | + Networks panel inspection, port mapping tab |
 | Phase 4 | Volumes CLI | + Volumes Data tab file browser (key Windows benefit) |
 | Phase 5 | Compose CLI | + Compose app grouping, Stats tab, env var inspection |
-| Phase 6 | ASP.NET Core | + Exec tab for non-root verify, health badge, .NET memory stats |
-| Phase 7 | DB containers | + Volume Data tab for PostgreSQL, Exec tab for psql |
+| Phase 6 | Express.js backend | + Exec tab for non-root verify, health badge, Node memory stats |
+| Phase 7 | DB containers | + Volume Data tab for MongoDB, Exec tab for mongosh |
 | Phase 8 | Prod Dockerfiles | + Images panel size comparison, Scout tab first use |
 | Phase 9 | Reverse proxy | + Port isolation verification in Ports tab, scale visibility |
 | Phase 10 | Monitoring | + Stats tab vs Grafana comparison, port link shortcuts |
