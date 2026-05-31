@@ -1,0 +1,30 @@
+# Compose Watch override — enables hot-reload for development.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.watch.yml watch
+services:
+
+  api:
+    develop:
+      watch:
+        - action: sync
+          path: ./api/server.js
+          target: /app/server.js
+        - action: rebuild
+          path: ./api/package.json
+
+  frontend:
+    # Override: run Vite dev server instead of Nginx for HMR
+    build:
+      context: ./frontend
+      target: dev
+    command: ["npm", "run", "dev"]
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+    develop:
+      watch:
+        - action: sync
+          path: ./frontend/src
+          target: /app/src
+        - action: rebuild
+          path: ./frontend/package.json
