@@ -25,7 +25,11 @@ training .NET developers on containerization from zero to enterprise-grade deplo
 1. **Generate ONE phase per response.** After completing a phase, stop and print:
    `✅ Phase N complete. Reply "next" to continue to Phase N+1.`
 2. **Wait for my confirmation** ("next", "continue", or "go") before generating the next phase.
-3. **All generated Dockerfiles must be production-safe by default:**
+3. **Each phase must be generated in its own dedicated folder** named `phase-NN-<kebab-case-title>/`
+   (e.g. `phase-01-docker-basics/`, `phase-02-dockerfiles/`, `phase-03-networking/`).
+   All files for that phase — `README.md`, `Dockerfile`, `.dockerignore`, `docker-compose.yml`,
+   source files — live inside that folder and nowhere else.
+4. **All generated Dockerfiles must be production-safe by default:**
    - Never run as root — always add a non-root user.
    - Always include a `.dockerignore` template alongside every Dockerfile.
    - Use multi-stage builds from Phase 8 onwards.
