@@ -67,20 +67,14 @@ docker pull nginx:stable-alpine
 docker pull ubuntu:24.04
 
 # ── Run Nginx ─────────────────────────────────────────────────────────────────
-docker run -d \
-  --name phase1-nginx \
-  -p 8080:80 \
-  nginx:stable-alpine
+docker run -d  --name phase1-nginx  -p 8080:80  nginx:stable-alpine
 
 # Verify Nginx is serving
 curl http://localhost:8080
 # Expected: HTML page with "Welcome to nginx!"
 
 # ── Run Ubuntu interactively ──────────────────────────────────────────────────
-docker run -it \
-  --name phase1-ubuntu \
-  ubuntu:24.04 \
-  /bin/bash
+docker run -it  --name phase1-ubuntu  ubuntu:24.04  /bin/bash
 
 # Inside the container, run:
 ls /
