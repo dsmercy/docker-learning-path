@@ -45,6 +45,11 @@ You will connect two containers — a React frontend and an Express.js mock API 
 > Container-to-container DNS (`product-api:3001`) is used when one *server process* calls
 > another server process inside the network (you will see this in Phase 5+ with SSR or
 > backend-to-backend calls).
+>
+> **Negative scenario:** `frontend-isolated` (port 3002) is placed on a separate network
+> (`phase3-isolated-net`) and uses `VITE_API_URL=http://product-api:3001`. Both choices
+> are wrong — different network breaks container DNS, and a container-DNS name can never
+> be resolved by the browser regardless. See the [Negative scenario](#negative-scenario--isolated-frontend-on-a-separate-network) section below.
 
 ## Folder structure
 
@@ -56,15 +61,26 @@ phase-03-networking/
 │   ├── Dockerfile         # node:20-alpine, non-root appuser
 │   ├── .dockerignore
 │   └── .gitignore
-├── frontend/
+├── frontend/              # POSITIVE scenario — same network as API
 │   ├── src/
 │   │   ├── main.jsx
-│   │   └── App.jsx        # Fetches from API_URL env var
+│   │   └── App.jsx        # Fetches from VITE_API_URL (localhost:3001)
 │   ├── index.html
 │   ├── vite.config.js
 │   ├── package.json
 │   ├── nginx.conf
 │   ├── Dockerfile         # Two-stage; VITE_API_URL build arg
+│   ├── .dockerignore
+│   └── .gitignore
+├── frontend-isolated/     # NEGATIVE scenario — separate network, fetch fails
+│   ├── src/
+│   │   ├── main.jsx
+│   │   └── App.jsx        # Fetches from product-api:3001 (will fail in browser)
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── package.json
+│   ├── nginx.conf
+│   ├── Dockerfile         # Two-stage; VITE_API_URL=http://product-api:3001
 │   ├── .dockerignore
 │   └── .gitignore
 └── README.md
@@ -79,10 +95,7 @@ Run all commands from your **WSL2 terminal**.
 docker build -t phase3-api:latest ./api
 
 # VITE_API_URL must be a host-visible address because the JS bundle runs in the browser
-docker build \
-  --build-arg VITE_API_URL=http://localhost:3001 \
-  -t phase3-frontend:latest \
-  ./frontend
+docker build  --build-arg VITE_API_URL=http://localhost:3001  -t phase3-frontend:latest  ./frontend
 
 # ── 2. Create the custom bridge network ──────────────────────────────────────
 docker network create phase3-net
@@ -91,11 +104,7 @@ docker network create phase3-net
 docker network ls | grep phase3-net
 
 # ── 3. Run the API container on the custom network ───────────────────────────
-docker run -d \
-  --name product-api \
-  --network phase3-net \
-  -p 3001:3001 \
-  phase3-api:latest
+docker run -d  --name product-api  --network phase3-net -p 3001:3001  phase3-api:latest
 
 # Verify the API is healthy
 curl http://localhost:3001/health
@@ -105,11 +114,7 @@ curl http://localhost:3001/products
 # Expected: JSON array of 5 products
 
 # ── 4. Run the frontend container on the same network ─────────────────────────
-docker run -d \
-  --name frontend \
-  --network phase3-net \
-  -p 3000:80 \
-  phase3-frontend:latest
+docker run -d --name frontend --network phase3-net -p 3000:80 phase3-frontend:latest
 
 # ── 5. Verify both containers are on the network ─────────────────────────────
 docker network inspect phase3-net
@@ -291,6 +296,98 @@ Without `--name`, Docker assigns a random name like `inspiring_hopper`. Containe
 | Both containers run as non-root | `docker exec <name> whoami` → `appuser` for both |
 | Browser shows product grid at `http://localhost:3000` | Open browser; 5 products visible |
 | Container DNS confirmed working | `wget -qO- http://product-api:3001/health` from inside frontend container succeeds |
+
+---
+
+## Negative scenario — isolated frontend on a separate network
+
+This section demonstrates what happens when a frontend container is placed on a **different** network from the API. It proves the positive scenario is not an accident — isolation is real and intentional.
+
+### What `frontend-isolated` does differently
+
+| | `frontend` (positive) | `frontend-isolated` (negative) |
+|---|---|---|
+| Network | `phase3-net` (same as API) | `phase3-isolated-net` (separate) |
+| `VITE_API_URL` | `http://localhost:3001` (host port — correct) | `http://product-api:3001` (container DNS — wrong for browser) |
+| Result | Products load | Fetch fails |
+| Port | `localhost:3000` | `localhost:3002` |
+
+Two failure modes combine in this scenario:
+
+1. **Wrong network** — `frontend-isolated` is on `phase3-isolated-net`; `product-api` is on `phase3-net`. There is no route between them. Container-to-container DNS only works when both containers share the same custom network.
+2. **Wrong URL type** — Even if the networks were connected, the browser cannot resolve `product-api` as a hostname. Docker container DNS is only available to processes running _inside_ the Docker network, never to the browser on the host.
+
+### Architecture
+
+```
+┌─────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│  phase3-net                         │     │  phase3-isolated-net                 │
+│                                     │  ✖  │                                      │
+│  ┌──────────────┐  ┌─────────────┐  │     │  ┌───────────────────────────────┐   │
+│  │  frontend    │  │ product-api │  │     │  │  frontend-isolated            │   │
+│  │  port 3000   │  │  port 3001  │  │     │  │  port 3002                    │   │
+│  └──────────────┘  └─────────────┘  │     │  │  VITE_API_URL=product-api:3001│   │
+│                                     │     │  └───────────────────────────────┘   │
+└─────────────────────────────────────┘     └──────────────────────────────────────┘
+         ↑ connected, DNS works                      ↑ isolated, fetch fails
+```
+
+### Running the negative scenario
+
+```bash
+# ── 1. Build the isolated frontend image ──────────────────────────────────────
+# VITE_API_URL is intentionally set to the container DNS name, not localhost.
+# The browser will fail to resolve this — that is the point.
+docker build --build-arg VITE_API_URL=http://product-api:3001 -t phase3-frontend-isolated:latest ./frontend-isolated
+
+# ── 2. Create a separate network (not the one the API is on) ──────────────────
+docker network create phase3-isolated-net
+
+# ── 3. Run the isolated frontend on the NEW network ───────────────────────────
+docker run -d --name frontend-isolated --network phase3-isolated-net -p 3002:80 phase3-frontend-isolated:latest
+
+# ── 4. Open the browser ───────────────────────────────────────────────────────
+# http://localhost:3002
+# Expected: red error box — "Fetch failed (expected)"
+# The UI explains both failure modes with a network diagram.
+
+# ── 5. Prove the API is unreachable via container DNS ────────────────────────
+docker exec frontend-isolated wget -qO- http://product-api:3001/health
+# Expected: wget: bad address 'product-api'
+# The container cannot resolve a name on a network it is not part of.
+
+# ── 6. Prove the API is also unreachable by IP across networks ────────────────
+# First get the API container's IP on phase3-net
+docker inspect product-api --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'
+# Then try to reach it from the isolated container (replace with actual IP)
+docker exec frontend-isolated wget -qO- --timeout=3 http://172.18.0.X:3001/health
+# Expected: connect timeout — no route between the two networks
+
+# ── 7. Verify networks are separate ──────────────────────────────────────────
+docker network inspect phase3-net | grep -A5 '"Containers"'
+# Shows: frontend, product-api  (NOT frontend-isolated)
+
+docker network inspect phase3-isolated-net | grep -A5 '"Containers"'
+# Shows: frontend-isolated only
+```
+
+### Cleanup for the negative scenario
+
+```bash
+docker stop frontend-isolated
+docker rm   frontend-isolated
+docker network rm phase3-isolated-net
+docker rmi phase3-frontend-isolated:latest
+```
+
+### What to observe in Docker Desktop
+
+1. Networks panel — both `phase3-net` and `phase3-isolated-net` appear. Click each: `frontend-isolated` is **only** in `phase3-isolated-net`, never in `phase3-net`.
+2. Containers panel → `frontend-isolated` → Exec tab — run `wget -qO- http://product-api:3001/health`. Watch it fail with `bad address`.
+3. Browser at `http://localhost:3002` — red error box appears. Open DevTools → Network tab — see the failed fetch request with a DNS resolution error.
+4. Compare with `http://localhost:3000` (the working frontend) — same code, different network and URL, completely different result.
+
+---
 
 ## Exercises
 

@@ -65,28 +65,18 @@ docker volume create wishlist-data
 docker volume ls | grep wishlist-data
 
 # ── 3. Run the container with the volume mounted ──────────────────────────────
-docker run -d \
-  --name wishlist-api \
-  -p 3001:3001 \
-  -v wishlist-data:/data \
-  phase4-wishlist:latest
+docker run -d --name wishlist-api -p 3001:3001 -v wishlist-data:/data phase4-wishlist:latest
 
 # ── 4. Confirm the API is healthy ─────────────────────────────────────────────
 curl http://localhost:3001/health
 # Expected: {"status":"ok","service":"wishlist-api","dataFile":"/data/wishlist.json"}
 
 # ── 5. Add items to the wishlist ──────────────────────────────────────────────
-curl -s -X POST http://localhost:3001/wishlist \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Mechanical Keyboard","price":129.99}'
+curl -s -X POST http://localhost:3001/wishlist -H "Content-Type: application/json" -d '{"name":"Mechanical Keyboard","price":129.99}'
 
-curl -s -X POST http://localhost:3001/wishlist \
-  -H "Content-Type: application/json" \
-  -d '{"name":"USB-C Hub","price":49.99}'
+curl -s -X POST http://localhost:3001/wishlist -H "Content-Type: application/json" -d '{"name":"USB-C Hub","price":49.99}'
 
-curl -s -X POST http://localhost:3001/wishlist \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Monitor Stand","price":39.99}'
+curl -s -X POST http://localhost:3001/wishlist -H "Content-Type: application/json" -d '{"name":"Monitor Stand","price":39.99}'
 
 # Verify items are saved
 curl http://localhost:3001/wishlist
@@ -106,11 +96,7 @@ docker rm   wishlist-api
 docker volume ls | grep wishlist-data   # still exists ✅
 
 # Start a brand-new container with the same volume
-docker run -d \
-  --name wishlist-api \
-  -p 3001:3001 \
-  -v wishlist-data:/data \
-  phase4-wishlist:latest
+docker run -d --name wishlist-api -p 3001:3001 -v wishlist-data:/data phase4-wishlist:latest
 
 curl http://localhost:3001/wishlist
 # Expected: same 3 items ✅ — data was never in the container, always in the volume
@@ -124,10 +110,7 @@ curl http://localhost:3001/wishlist
 # ── 9. Browse the volume file directly (no exec needed) ──────────────────────
 # Docker Desktop → Volumes → wishlist-data → Data tab
 # Or via CLI helper container:
-docker run --rm \
-  -v wishlist-data:/data \
-  alpine \
-  cat /data/wishlist.json
+docker run --rm -v wishlist-data:/data alpine cat /data/wishlist.json
 ```
 
 ## Commands reference
