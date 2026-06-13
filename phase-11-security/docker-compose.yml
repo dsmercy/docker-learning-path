@@ -1,0 +1,80 @@
+secrets:
+  mongodb_uri:
+    file: ./secrets/mongodb_uri.txt
+
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  db:
+    image: mongo:7.0
+    container_name: phase11-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: products
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    # Drop all Linux capabilities — MongoDB only needs what it ships with
+    cap_drop:
+      - ALL
+    # Resource limits — prevents a runaway DB from taking down the host
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase11-net
+
+  # ── API ────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      target: production
+    container_name: phase11-api
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+    # The secret is mounted at /run/secrets/mongodb_uri — NOT in environment variables.
+    # docker inspect phase11-api → Env shows no connection string.
+    secrets:
+      - mongodb_uri
+    ports:
+      - "3001:3001"
+    # Drop all Linux capabilities — Node.js needs none beyond defaults
+    cap_drop:
+      - ALL
+    # Read-only root filesystem — writes are only allowed to the tmpfs mounts below
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase11-net
+
+volumes:
+  mongo-data:
+
+networks:
+  phase11-net:
+    driver: bridge

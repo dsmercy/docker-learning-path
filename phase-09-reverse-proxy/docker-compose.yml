@@ -1,0 +1,78 @@
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  db:
+    image: mongo:7.0
+    container_name: phase9-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: products
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase9-net
+
+  # ── API — no host port: only reachable via Nginx ──────────────────────────
+  api:
+    build:
+      context: ./api
+      target: production
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      MONGODB_URI: mongodb://db:27017/products
+    # No ports: mapping — Nginx reaches the API over the internal network only.
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase9-net
+
+  # ── Frontend — no host port: only reachable via Nginx ─────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      target: production
+    restart: unless-stopped
+    # No ports: mapping — Nginx proxies / to this container internally.
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - phase9-net
+
+  # ── Nginx — the ONLY container with host-mapped ports ─────────────────────
+  nginx:
+    build:
+      context: ./nginx
+    container_name: phase9-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - frontend
+      - api
+    networks:
+      - phase9-net
+
+volumes:
+  mongo-data:
+
+networks:
+  phase9-net:
+    driver: bridge

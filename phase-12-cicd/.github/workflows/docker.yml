@@ -1,0 +1,151 @@
+name: Docker Build, Scan & Push
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'phase-12-cicd/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'phase-12-cicd/**'
+
+env:
+  REGISTRY: docker.io
+  API_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/phase12-api
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/phase12-frontend
+
+jobs:
+  # ── Lint ────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: phase-12-cicd/api/package.json
+
+      - name: Install API deps
+        working-directory: phase-12-cicd/api
+        run: npm install
+
+      - name: Lint API
+        working-directory: phase-12-cicd/api
+        run: npx eslint server.js --max-warnings 0 || true   # non-blocking for learning
+
+  # ── Build & Scan ─────────────────────────────────────────────────────────────
+  build-and-scan:
+    name: Build, Scan & Push
+    runs-on: ubuntu-latest
+    needs: lint
+    permissions:
+      contents: read
+      security-events: write   # for uploading SARIF results
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Set up Docker Buildx for advanced build features (cache, multi-platform)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in to Docker Hub — credentials stored as GitHub Actions secrets
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Compute image tags: latest + short git SHA for traceability
+      - name: Docker metadata — API
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.API_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: Docker metadata — Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      # Build API image — use GitHub Actions cache to speed up subsequent runs
+      - name: Build API image
+        uses: docker/build-push-action@v5
+        with:
+          context: phase-12-cicd/api
+          target: production
+          push: false          # push only after scan passes
+          load: true           # load into local daemon for Trivy scan
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Vulnerability gate: fail the pipeline if any CRITICAL CVEs are found
+      - name: Trivy scan — API (CRITICAL gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.API_IMAGE }}:latest
+          format: table
+          exit-code: '1'          # fail pipeline on critical CVEs
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      # Push API image only after passing the Trivy gate
+      - name: Push API image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          context: phase-12-cicd/api
+          target: production
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build + scan + push frontend
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: phase-12-cicd/frontend
+          target: production
+          push: false
+          load: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy scan — Frontend (CRITICAL gate)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:latest
+          format: table
+          exit-code: '1'
+          severity: CRITICAL
+          ignore-unfixed: true
+
+      - name: Push frontend image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v5
+        with:
+          context: phase-12-cicd/frontend
+          target: production
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

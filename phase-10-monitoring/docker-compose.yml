@@ -1,0 +1,114 @@
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  db:
+    image: mongo:7.0
+    container_name: phase10-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: products
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase10-net
+
+  # ── API (with /metrics endpoint) ───────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      target: production
+    container_name: phase10-api
+    restart: unless-stopped
+    environment:
+      PORT: 3001
+      NODE_ENV: production
+      MONGODB_URI: mongodb://db:27017/products
+      LOKI_URL: http://loki:3100
+    ports:
+      - "3001:3001"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - phase10-net
+
+  # ── Loki — log aggregation backend ────────────────────────────────────────
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: phase10-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki-data:/tmp/loki
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - phase10-net
+
+  # ── Prometheus — metrics scraper ──────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: phase10-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - phase10-net
+
+  # ── Grafana — dashboard UI ─────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: phase10-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - loki
+    networks:
+      - phase10-net
+
+volumes:
+  mongo-data:
+  loki-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  phase10-net:
+    driver: bridge
